@@ -1,0 +1,307 @@
+This article uses Open Shift GitOps to deploy the Argo Rollouts progressive delivery controller. It walks through a Blue-Green deployment.
+
+Blue-Green Deployment is a technique that reduces downtime and risk by running two identical production environments, only one of which (blue) serves production traffic at any time. 
+After the new version (green) is deployed and tested, traffic is switched from the blue environment to the green environment.
+
+Kubernetes Deployment Strategies:
+1.Recreate Deployment Strategy.
+2.Rolling Update Deployment Strategy.
+3.Blue/Green Deployment Strategy in Kubernetes.
+4.Canary Deployment Strategy.
+
+Drawbacks of Kubernetes Deployment Strategies
+Kubernetes deployment strategies, while powerful, do have some drawbacks to consider. Here are some limitations to be aware of:
+
+Rolling Update:
+Downtime: Even with controlled parameters, there's a brief period during pod replacement where the application might be unavailable.
+Resource Consumption: Running both old and new pods concurrently can temporarily increase resource usage.
+Blue/Green Deployment:
+Cost: Maintaining two identical environments can be expensive in terms of resource allocation.
+Complexity: Managing traffic routing between Blue and Green environments adds an extra layer of complexity.
+Canary Deployment:
+Limited Scope: May not be suitable for large-scale deployments where a wider Canary rollout is needed.
+Monitoring Overhead: Requires additional monitoring effort to track the health of the Canary version.
+
+What are Argo Projects?
+Argo is a group of many open-source projects which help in the fast and safe delivery of software by extending the capabilities of Kubernetes. Argo Rollouts has been introduced and it contains below a different set of projects.
+Argo CD - Declarative GitOps Continuous Delivery.
+Argo Events - Event-based Dependency Manager.
+Argo Workflows - Container-native Workflow Engine.
+Argo Rollouts - Progressive Delivery with support for Canary and Blue Green deployment strategies.
+Argoproj-labs - separate GitHub org that is setup for community contributions related to the Argoproj ecosystem.
+
+What is Argo Rollouts?
+Argo Rollouts is a Kubernetes controller that extends deployment capabilities with a focus on progressive delivery. Here's a breakdown of what it offers:
+
+Advanced Deployment Strategies: It goes beyond basic rolling updates by enabling strategies like Blue/Green and Canary deployments.
+Canary Analysis: It integrates with monitoring tools to analyze the health of your Canary deployments before promoting them to full production.
+Progressive Delivery: It provides features for gradual traffic shifting during deployments, minimizing risk and rollback effort.
+Integration with Service Mesh/Ingress: It can leverage traffic management capabilities of service meshes or ingress controllers for smoother traffic routing during rollouts.
+Metrics-Driven Rollouts: It can integrate with various providers to analyze application metrics and automate promotion or rollback decisions based on predefined KPIs.
+
+In simpler terms, Argo Rollouts provides a more sophisticated toolbox for managing deployments in Kubernetes. It allows for controlled rollouts, risk reduction through techniques like Canary deployments, and even automated decisions based on application health.
+
+How Argo Rollouts works?
+Argo Rollouts is a Kubernetes controller and set of CRDs (Custom Resource Definitions) which provides advanced deployment capabilities such as Blue-Green, Canary, and Progressive Delivery strategies. It extends the functionality of Kubernetes deployments and integrates well with other tools like Argo CD for GitOps workflows.
+
+Reference: Argo-Rollout-Architecture
+
+Argo Rollouts enhances Kubernetes deployment capabilities by providing more sophisticated strategies like Canary, Blue-Green, and Progressive Delivery. It allows for safer, more reliable, and automated deployments, integrating seamlessly with existing Kubernetes clusters and CI/CD pipelines.
+
+Benefits of Argo Rollouts for Blue-Green Deployments
+Control and Visibility: Argo Rollouts provides a clear and controlled way to manage the traffic shifting between the blue and green environments.
+
+Automated Rollouts: It supports automated promotions based on success metrics or manual approval.
+
+Rollback Capabilities: Easy rollback to the previous stable version in case of issues.
+
+Integration with Kubernetes: Utilizes Kubernetes resources and APIs, making it suitable for Kubernetes-native workflows.
+
+Let's Start with Hands-on of Argo Rollouts with Blue-Green Deployments.
+
+Prerequisites:
+Pre-Install Ubuntu 24.04 LTS
+Sudo User with admin privileges
+2 GB RAM or more
+2 CPU / vCPU or more
+20 GB free hard disk space or more
+Docker / Virtual Machine Manager – KVM & VirtualBox
+Stable Internet Connection
+Install Minikube and ArgoCD on Ubuntu 24.04 LTS
+Install Minikube and ArgoCD on Ubuntu 24.04 LTS
+
+Step #1:Installation of Argo Rollouts controller
+First, you need to install Argo Rollouts in your Kubernetes cluster.
+Clone the git repository from
+
+https://github.com/Ankita2295/ArgoCD.git
+
+To Install Argo Rollouts controller, we have to Create the namespace.
+#kubectl create namespace argo-rollouts
+You will see the namespace has been created.
+#kubectl get ns argo-rollouts
+You can do this using kubectl by applying the manifests provided by Argo Rollouts.
+
+#kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+You will see the controller and other components have been deployed. Wait for the pods to be in the Running state.
+
+#kubectl get all -n argo-rollouts
+To Install Argo Rollouts Kubectl plugin with curl for easy interaction with Rollout controller and resources.
+#curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+#chmod +x ./kubectl-argo-rollouts-linux-amd64
+#sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+#kubectl argo rollouts version
+Argo Rollouts comes with its own GUI as well that you can access with the below command.
+
+#kubectl argo rollouts dashboard
+Now you can access Argo Rollout console, by accessing localhost:3100 on your browser. You would be presented with UI as shown below.
+
+http://localhost:3100 OR http://public_IP:31000
+
+Now, let’s move and deploy our first sample app using the Blue-Green Deployment strategy.
+
+Step #2: Define the Blue-Green Rollout YAML
+Create a custom resource definition (CRD) to define your blue-green rollout strategy.
+
+we will deploy the sample app which contains Rollouts, Service, and Ingress as Kubernetes objects.
+
+Create below yaml's as shown below rollout.yaml, service.yaml and ingress.yaml or you can follow our GitHub Repository.
+
+rollout.yaml content:
+
+# This example demonstrates a Rollout using the blue-green update strategy, which contains a manual
+# gate before promoting the new stack.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: rollout-bluegreen
+spec:
+  replicas: 2
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: rollout-bluegreen
+  template:
+    metadata:
+      labels:
+        app: rollout-bluegreen
+    spec:
+      containers:
+      - name: rollouts-demo
+        image: argoproj/rollouts-demo:blue
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+  strategy:
+    blueGreen:
+      # activeService specifies the service to update with the new template hash at time of promotion.
+      # This field is mandatory for the blueGreen update strategy.
+      activeService: rollout-bluegreen-active
+      # previewService specifies the service to update with the new template hash before promotion.
+      # This allows the preview stack to be reachable without serving production traffic.
+      # This field is optional.
+      previewService: rollout-bluegreen-preview
+      # autoPromotionEnabled disables automated promotion of the new stack by pausing the rollout
+      # immediately before the promotion. If omitted, the default behavior is to promote the new
+      # stack as soon as the ReplicaSet are completely ready/available.
+      # Rollouts can be resumed using: `kubectl argo rollouts promote ROLLOUT`
+      autoPromotionEnabled: false
+activeService: The name of the currently serving service (blue).
+previewService: The name of the new service (green).
+autoPromotionEnabled: Automatically promote the green service to active if successful.
+
+service.yaml content:
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: rollout-bluegreen-active
+spec:
+  selector:
+    app: rollout-bluegreen
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: rollout-bluegreen-preview
+spec:
+  selector:
+    app: rollout-bluegreen
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+
+ingress.yaml content:
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rollout-bluegreen
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rollout-bluegreen-active
+            port:
+              number: 80
+To apply a configuration to a resource by file or stdin. This means it will create or update the resources defined in the service.yaml file on your Kubernetes cluster.
+
+#kubectl apply -f service.yaml
+To apply a configuration to a Kubernetes resource defined in the rollout.yaml file. This file typically contains the configuration for a resource managed by Argo Rollouts, such as a Rollout or a Deployment that uses advanced deployment strategies.
+#kubectl apply -f rollout.yaml
+To apply a configuration to an Ingress resource in a Kubernetes cluster. The ingress.yaml file typically contains the configuration for defining how external HTTP/S traffic should be routed to services within the Kubernetes cluster.
+#kubectl apply -f ingress.yaml
+List all pods in the default namespace.
+#kubectl get pods
+List all services in the default namespace:
+#kubectl get services
+You will be able to see all the objects been created in the default namespace by running the below commands.
+#kubectl get all
+Now, again visit the Argo-Rollouts console. And this time, you could see the sample deployed on the Argo Rollouts console as below.
+
+You can click on this rollout-blue-green in the console, and it will present you with its current status as below.
+
+You can see the current status of this rollout by running the below command as well
+
+#kubectl argo rollouts get rollout rollout-bluegreen
+Output:
+ubuntu@ip-172-31-14-66:~$ #kubectl argo rollouts get rollout rollout-bluegreen
+Name:            rollout-bluegreen
+Namespace:       default
+Status:          ✔ Healthy
+Strategy:        BlueGreen
+Images:          argoproj/rollouts-demo:blue (stable, active)
+Replicas:
+  Desired:       2
+  Current:       2
+  Updated:       2
+  Ready:         2
+  Available:     2
+
+NAME                                           KIND        STATUS     AGE    INFO
+⟳ rollout-bluegreen                            Rollout     ✔ Healthy  3m19s
+└──# revision:1
+   └──⧉ rollout-bluegreen-5ffd47b8d4           ReplicaSet  ✔ Healthy  3m19s  stable,active
+      ├──□ rollout-bluegreen-5ffd47b8d4-bh6bv  Pod         ✔ Running  3m19s  ready:1/1
+      └──□ rollout-bluegreen-5ffd47b8d4-gnszs  Pod         ✔ Running  3m19s  ready:1/1
+You can see blue deployment on browser also
+
+Run the below kubectl command to expose blue-green service to access on browser.
+#kubectl port-forward svc/rollout-bluegreen-active --address 0.0.0.0 8081:80
+Open browser type IP and port 8081 port as shown below.
+Now, let’s deploy the green version of the app via command line.​​You would be able to see new i.e. green version-based set of pods of our sample app, coming up
+#kubectl argo rollouts set image rollout-bluegreen rollouts-demo=argoproj/rollouts-demo:green
+To check pods using kubectl
+#kubectl get pods
+Output:
+
+ubuntu@ip-172-31-14-66:~$ #kubectl argo rollouts set image rollout-bluegreen rollouts-demo=argoproj/rollouts-demo:green
+rollout "rollout-bluegreen" image updated
+ubuntu@ip-172-31-14-66:~$ kubectl get pods
+NAME                                 READY   STATUS    RESTARTS   AGE
+my-app-766c8d6974-kk245              1/1     Running   0          57m
+rollout-bluegreen-5ffd47b8d4-bh6bv   1/1     Running   0          6m2s
+rollout-bluegreen-5ffd47b8d4-gnszs   1/1     Running   0          6m2s
+rollout-bluegreen-75695867f-bqsgr    1/1     Running   0          30s
+rollout-bluegreen-75695867f-dbj45    1/1     Running   0          30s
+Now, after a few seconds, you will be able to see both your old set of pods (with version blue) as well as the new set of pods (with version green) available. Also on the Argo console, you will be able to see below the kind of new revision of the app with the changed image version running.
+
+If you visit the localhost:80 or public_ip:8081 on your browser, you will still see only the blue version is visible rightly because we have not yet fully promoted the green version of our app You can confirm the same now, by running the command below, which shows the new version is in paused state.
+
+And let us promote the green version of our app, by executing below command.
+
+#kubectl argo rollouts get rollout rollout-bluegreen
+Let's, promote the green version of our app using below command
+
+#kubectl argo rollouts promote rollout-bluegreen
+Output:
+ubuntu@ip-172-31-14-66:~$ #kubectl argo rollouts get rollout rollout-bluegreen
+Name:            rollout-bluegreen
+Namespace:       default
+Status:          ॥ Paused
+Message:         BlueGreenPause
+Strategy:        BlueGreen
+Images:          argoproj/rollouts-demo:blue (stable, active)
+                 argoproj/rollouts-demo:green (preview)
+Replicas:
+  Desired:       2
+  Current:       4
+  Updated:       2
+  Ready:         2
+  Available:     2
+
+NAME                                           KIND        STATUS     AGE    INFO
+⟳ rollout-bluegreen                            Rollout     ॥ Paused   6m31s
+├──# revision:2
+│  └──⧉ rollout-bluegreen-75695867f            ReplicaSet  ✔ Healthy  59s    preview
+│     ├──□ rollout-bluegreen-75695867f-bqsgr   Pod         ✔ Running  59s    ready:1/1
+│     └──□ rollout-bluegreen-75695867f-dbj45   Pod         ✔ Running  59s    ready:1/1
+└──# revision:1
+   └──⧉ rollout-bluegreen-5ffd47b8d4           ReplicaSet  ✔ Healthy  6m31s  stable,active
+      ├──□ rollout-bluegreen-5ffd47b8d4-bh6bv  Pod         ✔ Running  6m31s  ready:1/1
+      └──□ rollout-bluegreen-5ffd47b8d4-gnszs  Pod         ✔ Running  6m31s  ready:1/1
+#kubectl argo rollouts promote rollout-bluegreen
+rollout 'rollout-bluegreen' promoted
+Run the below command and you would see it’s scaling the new i.e. green version of our app completely.
+
+
+#kubectl argo rollouts get rollout rollout-bluegreen
+You can see green deployment on browser also. Run the below kubectl command to expose blue-green service to access on browser.
+
+
+#kubectl port-forward svc/rollout-bluegreen-active --address 0.0.0.0 8081:80
+Open browser type , type ip and 8081 port as shown below.
+
+We have successfully completed blue-green deployment using Argo Rollouts on Kubernetes.
